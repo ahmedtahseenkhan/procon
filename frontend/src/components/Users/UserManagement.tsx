@@ -107,7 +107,7 @@ function UserManagement() {
 
   const handleToggleActive = async (user: User) => {
     try {
-      await updateUser(user.user_id, { ...user, is_active: !user.is_active });
+      await updateUser(user.user_id, { is_active: !user.is_active } as any);
       fetchUsers();
     } catch (error) {
       console.error("Error updating user:", error);
@@ -340,7 +340,7 @@ function UserManagement() {
             </h3> */}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* <div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Username
                 </label>
@@ -350,10 +350,11 @@ function UserManagement() {
                   onChange={(e) =>
                     setFormData({ ...formData, username: e.target.value })
                   }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="john.doe"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-transparent"
                   required
                 />
-              </div> */}
+              </div>
 
               <div>
                 <label className="block text-[16px] font-medium text-[rgba(0,0,0,1)] mb-1">
@@ -371,7 +372,7 @@ function UserManagement() {
                 />
               </div>
 
-              {/* <div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Password {editingUser && "(leave blank to keep current)"}
                 </label>
@@ -381,10 +382,11 @@ function UserManagement() {
                   onChange={(e) =>
                     setFormData({ ...formData, password: e.target.value })
                   }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder={editingUser ? "Leave blank to keep existing password" : "Enter a secure password"}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-transparent"
                   required={!editingUser}
                 />
-              </div> */}
+              </div>
 
               <div>
                 <label className="block text-[16px] font-medium text-[rgba(0,0,0,1)] mb-1">
@@ -396,7 +398,12 @@ function UserManagement() {
                   multiSelect={false}
                   containerClassName="w-full"
                   onChange={(val) =>
-                    setFormData({ ...formData, role_name: val })
+                    setFormData({
+                      ...formData,
+                      role_name: Array.isArray(val)
+                        ? (val[0] ?? formData.role_name)
+                        : val,
+                    })
                   }
                 />
 

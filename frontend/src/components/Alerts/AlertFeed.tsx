@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { getEvents } from "../../services/api";
+import { getEvents, getDevices } from "../../services/api";
 import { DeviceEvent } from "../../types";
 import AlertDetailModal from "./AlertDetailModal";
 import search from "../../assets/icons/search.svg";
@@ -19,11 +19,16 @@ interface AlertFilters {
   deviceId: string;
   dateRange: string;
 }
-const severityOptions = ["All Severities", "Critical", "High", "Medium", "Low"];
+const severityOptions = ["All Severities", "Critical", "Maintenance", "Warning", "Normal"];
 const clustersOptions = ["Group A", "Group B", "Group C", "Group D"];
 
 function AlertFeed() {
   const [events, setEvents] = useState<DeviceEvent[]>([]);
+  const [devicesMap, setDevicesMap] = useState<Record<string, { group_name?: string; nickname?: string }>>({});
+  const [search, setSearch] = useState("");
+  const [selectedClusters, setSelectedClusters] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [filters, setFilters] = useState<AlertFilters>({
     severity: "all",
     eventType: "all",
@@ -35,48 +40,98 @@ function AlertFeed() {
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
-    const fetchEvents = async () => {
+    const fetchAll = async () => {
       try {
         setLoading(true);
-        const response = await getEvents();
-        setEvents(response.events || []);
+        const [evRes, devRes] = await Promise.all([getEvents(), getDevices()]);
+        setEvents(evRes.events || []);
+        const m: Record<string, { group_name?: string; nickname?: string }> = {};
+        for (const d of (devRes.devices || [])) {
+          const key = d.device_id || d.serial_number || d.imei;
+          if (key) m[key] = { group_name: d.group_name, nickname: d.nickname };
+        }
+        setDevicesMap(m);
       } catch (error) {
-        console.error("Error fetching events:", error);
+        console.error("Error fetching events/devices:", error);
       } finally {
         setLoading(false);
       }
     };
-
-    fetchEvents();
-    const interval = setInterval(fetchEvents, 30000); // Refresh every 30 seconds
+    fetchAll();
+    const interval = setInterval(fetchAll, 30000);
     return () => clearInterval(interval);
   }, []);
 
   const filteredEvents = useMemo(() => {
-    return events.filter((event) => {
-      if (filters.severity !== "all" && event.severity !== filters.severity)
-        return false;
-      if (filters.eventType !== "all" && event.event_type !== filters.eventType)
-        return false;
-      if (filters.deviceId !== "all" && event.device_id !== filters.deviceId)
-        return false;
+    const term = search.trim().toLowerCase();
+    return events.filter((e: any) => {
+      const sev = String(e.severity || "").toLowerCase();
+      const cat = String(e.category || "").toLowerCase();
 
-      if (filters.dateRange !== "all") {
-        const eventDate = new Date(event.event_timestamp);
-        const now = new Date();
-        const hoursAgo = parseInt(filters.dateRange);
+      // Severity: maintenance uses category, others by severity (critical, warning, normal, etc.)
+      if (filters.severity !== "all") {
+        const filterSev = String(filters.severity || "").toLowerCase();
+        if (filterSev === "maintenance") {
+          if (cat !== "maintenance") return false;
+        } else if (sev !== filterSev) {
+          return false;
+        }
+      }
 
+      // Cluster filter (selectedClusters empty = all)
+      const machine = e.device_id || e.serial_number || e.imei;
+      const cluster = String(devicesMap[machine]?.group_name || "").toLowerCase();
+      const nickname = String(devicesMap[machine]?.nickname || "").toLowerCase();
+      if (selectedClusters.length > 0) {
+        if (!selectedClusters.map((c) => c.toLowerCase()).includes(cluster)) return false;
+      }
+
+      // Search: event_id (primary), plus machine / cluster / nickname
+      if (term) {
+        const machineStr = String(machine || "").toLowerCase();
+        const eventIdStr = String(e.event_id ?? "").toLowerCase();
         if (
-          hoursAgo > 0 &&
-          eventDate < new Date(now.getTime() - hoursAgo * 60 * 60 * 1000)
+          !eventIdStr.includes(term) &&
+          !machineStr.includes(term) &&
+          !cluster.includes(term) &&
+          !nickname.includes(term)
         ) {
           return false;
         }
       }
 
+      // Date range (hours)
+      if (filters.dateRange !== "all") {
+        const dt = new Date(e.event_timestamp);
+        const hours = parseInt(filters.dateRange);
+        if (hours > 0 && dt < new Date(Date.now() - hours * 60 * 60 * 1000)) return false;
+      }
       return true;
     });
-  }, [events, filters]);
+  }, [events, filters, search, selectedClusters, devicesMap]);
+
+  const totalPages = Math.max(Math.ceil(filteredEvents.length / pageSize), 1);
+  const pageEvents = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredEvents.slice(start, start + pageSize);
+  }, [filteredEvents, page, pageSize]);
+
+  const rowBgClass = (sev: string, cat?: string) => {
+    const s = String(sev||'').toLowerCase();
+    const c = String(cat||'').toLowerCase();
+    if (s === 'critical') return 'bg-[rgba(254,236,237,1)]';
+    if (c === 'maintenance') return 'bg-[rgba(250,245,255,1)]';
+    if (s === 'warning' || s === 'high') return 'bg-[rgba(255,246,234,1)]';
+    return 'bg-[rgba(237,250,241,1)]';
+  };
+
+  const timeAgo = (iso: string) => {
+    const d = new Date(iso); const mins = Math.floor((Date.now()-d.getTime())/60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins/60); if (hrs < 24) return `${hrs} hr${hrs>1?'s':''} ago`;
+    const days = Math.floor(hrs/24); return `${days} day${days>1?'s':''} ago`;
+  };
 
   const severityCounts = useMemo(() => {
     return events.reduce((acc, event) => {
@@ -193,10 +248,10 @@ function AlertFeed() {
         </div>
         <div className="flex items-center space-x-3">
           <div className="inline-flex items-center gap-2 rounded-md  border border-[rgba(223,0,3,0.34)] bg-[rgba(255,0,0,0.03)] px-[10px] py-[6px] font-medium text-[14px] leading-none text-red-700">
-            6 Critical
+            {(severityCounts.critical || 0)} Critical
           </div>
           <div className="inline-flex items-center gap-2 rounded-md border border-[rgba(220,155,0,0.62)] bg-[rgba(244,209,0,0.09)] px-[10px] py-[6px] font-medium text-[14px] leading-none text-yellow-800">
-            6 Warning
+            {(severityCounts.high || 0)} Warning
           </div>
         </div>
       </div>
@@ -219,21 +274,40 @@ function AlertFeed() {
                 type="text"
                 placeholder="search by alerts"
                 className="w-full h-[40px] pl-10 pr-4 py-2 rounded border border-[rgba(235,235,235,1)] bg-white outline-none focus:outline-none focus:ring-0 focus:border-[rgba(235,235,235,1)] text-sm"
+                value={search}
+                onChange={(e)=>{ setSearch(e.target.value); setPage(1); }}
               />
             </div>
           </div>
           <CustomSelect
             options={severityOptions}
-            value="All Severities"
+            value={filters.severity === 'all' ? 'All Severities' : (filters.severity === 'maintenance' ? 'Maintenance' : (filters.severity.charAt(0).toUpperCase()+filters.severity.slice(1)))}
             multiSelect={false}
-            onChange={(val) => console.log("Selected:", val)}
+            onChange={(val) => {
+              const sel = Array.isArray(val) ? val[0] : val;
+              const map: Record<string,string> = {
+                'All Severities': 'all',
+                'All': 'all',
+                'Critical': 'critical',
+                'Maintenance': 'maintenance',
+                'Warning': 'warning',
+                'Normal': 'normal',
+              };
+              setFilters((f)=>({ ...f, severity: map[sel] ?? 'all' }));
+              setPage(1);
+            }}
           />
 
           <CustomSelect
             options={clustersOptions}
             firstOption="All Clusters"
             multiSelect={true}
-            onChange={(selected) => console.log("Selected:", selected)}
+            value={selectedClusters}
+            onChange={(selected) => {
+              const v = Array.isArray(selected) ? selected : [selected];
+              setSelectedClusters(v);
+              setPage(1);
+            }}
           />
         </div>
       </div>
@@ -266,115 +340,49 @@ function AlertFeed() {
               </tr>
             </thead>
             <tbody>
-              {/* Critical Alert */}
-              <tr className="w-full min-h-[72px] border-t border-[rgba(0,0,47,0.15)] bg-[rgba(254,236,237,1)] py-2">
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  <div className="flex items-center space-x-2">
-                    <span>M-001</span>
-                    <span className="bg-[#e5484d] text-white px-[8px] py-[4px] rounded text-[10px] font-medium leading-[12px] tracking-[0.5px]">
-                      Critical
-                    </span>
-                  </div>
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  Main Door Open
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  Group A
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  2 min ago
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-[#60646C]">
-                  <a href="#" className="flex items-center space-x-1">
-                    <span>See on Map</span>
-                    <img src={arrowright} alt="" />
-                  </a>
-                </td>
-              </tr>
-
-              {/* Maintenance Alert */}
-              <tr className="bg-[rgba(250,245,255,1)] w-full min-h-[72px] border-t-[1px] border-t-[rgba(0,0,47,0.15)]  py-2">
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  <div className="flex items-center space-x-2">
-                    <span>M-045</span>
-                    <span className="bg-[#8e4ec6] text-white px-[8px] py-[4px] rounded text-[10px] font-medium leading-[12px] tracking-[0.5px]">
-                      Maintenance
-                    </span>
-                  </div>
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  Scheduled Maintenance
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  Group B
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  5 min ago
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-[#60646C]">
-                  <a href="#" className="flex items-center space-x-1">
-                    <span>See on Map</span>
-                    <img src={arrowright} alt="" />
-                  </a>
-                </td>
-              </tr>
-
-              {/* Warning Alert */}
-              <tr className="bg-[rgba(255,246,234,1)] w-full min-h-[72px] border-t-[1px] border-t-[rgba(0,0,47,0.15)]  py-2">
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  <div className="flex items-center space-x-2">
-                    <span>M-067</span>
-                    <span className="bg-[rgba(255,197,61,1)] text-[rgba(28,32,36,1)] px-[8px] py-[4px] rounded text-[10px] font-medium leading-[12px] tracking-[0.5px]">
-                      Warning
-                    </span>
-                  </div>
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  Scheduled Maintenance
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  Group D
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  25 min ago
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-[#60646C]">
-                  <a href="#" className="flex items-center space-x-1">
-                    <span>See on Map</span>
-                    <img src={arrowright} alt="" />
-                  </a>
-                </td>
-              </tr>
-
-              {/* Normal - Resolved Alert */}
-              <tr className="bg-[rgba(237,250,241,1)] w-full min-h-[72px] border-t-[1px] border-t-[rgba(0,0,47,0.15)]  py-2">
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  <div className="flex items-center space-x-2">
-                    <span>M-023</span>
-                    <span className="bg-[#30a46c] text-white text-[rgba(28,32,36,1)] px-[8px] py-[4px] rounded text-[10px] font-medium leading-[12px] tracking-[0.5px]">
-                      Normal - Resolved
-                    </span>
-                  </div>
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  System Health Check
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  Group A
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
-                  10 min ago
-                </td>
-                <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-[#60646C]">
-                  <a href="#" className="flex items-center space-x-1">
-                    <span>See on Map</span>
-                    <img src={arrowright} alt="" />
-                  </a>
-                </td>
-              </tr>
+              {pageEvents.map((ev: any) => {
+                const machine = ev.device_id || ev.serial_number || ev.imei;
+                const cluster = devicesMap[machine]?.group_name || '-';
+                const pill = ev.category && ev.category.toLowerCase() === 'maintenance' ? 'Maintenance' : (String(ev.severity||'').toUpperCase());
+                return (
+                  <tr key={ev.event_uuid || `${machine}-${ev.event_timestamp}`}
+                      className={`w-full min-h-[72px] border-t border-[rgba(0,0,47,0.15)] py-2 ${rowBgClass(ev.severity, ev.category)}`}>
+                    <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
+                      <div className="flex items-center space-x-2">
+                        <span>{machine}</span>
+                        {(() => { const sk = String(ev.severity||'').toLowerCase(); const sevForClass = sk === 'warning' ? 'high' : sk; return (
+                        <span className={`px-[8px] py-[4px] rounded text-[10px] font-medium leading-[12px] tracking-[0.5px] ${getSeverityColor(sevForClass)}`}>
+                          {pill}
+                        </span> );})()}
+                      </div>
+                    </td>
+                    <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
+                      {ev.event_id || ev.event_entry}
+                    </td>
+                    <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
+                      {cluster}
+                    </td>
+                    <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-gray-900">
+                      {timeAgo(ev.event_timestamp)}
+                    </td>
+                    <td className="py-4 px-4 text-[16px] font-normal leading-[24px] tracking-[0.5px] text-[#60646C]">
+                      <a href="#" className="flex items-center space-x-1">
+                        <span>See on Map</span>
+                        <img src={arrowright} alt="" />
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between mt-4">
+          <div className="text-sm text-gray-600">Page {page} of {totalPages}</div>
+          <div className="space-x-2">
+            <button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))} className="px-3 py-1 border rounded disabled:opacity-50">Prev</button>
+            <button disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))} className="px-3 py-1 border rounded disabled:opacity-50">Next</button>
+          </div>
         </div>
       </div>
 

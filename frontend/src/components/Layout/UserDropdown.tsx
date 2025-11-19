@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import avatarImg from "../../assets/icons/avatar.png"; // dummy avatar
 import { useNavigate } from "react-router-dom";
+import { useAuthContext } from "../../contexts/AuthContext";
 function UserDropdown() {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const { logout } = useAuthContext();
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -47,7 +49,13 @@ function UserDropdown() {
           >
             Preferences
           </button>
-          <button className="w-full text-[14px] font-normal text-gray-800 px-3 py-2 rounded hover:bg-blue-600 hover:text-white text-left">
+          <button
+            onClick={() => {
+              logout();
+              setOpen(false);
+            }}
+            className="w-full text-[14px] font-normal text-gray-800 px-3 py-2 rounded hover:bg-blue-600 hover:text-white text-left"
+          >
             Logout
           </button>
         </div>

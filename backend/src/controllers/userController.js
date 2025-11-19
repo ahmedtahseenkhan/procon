@@ -98,7 +98,7 @@ async function updateUser(req, res) {
 
     const { rows } = await pool.query(
       `UPDATE users 
-       SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+       SET ${updates.join(', ')}
        WHERE user_id = $${paramCount} AND company_id = $${paramCount + 1}
        RETURNING user_id, username, email, role_name, is_active, created_at, last_login`,
       values

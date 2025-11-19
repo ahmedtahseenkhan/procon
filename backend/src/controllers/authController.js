@@ -24,7 +24,7 @@ async function loginHandler(req, res) {
     
     let user = null;
     try {
-      const { rows } = await pool.query('SELECT user_id, username, password_hash, company_id, role_name, mfa_secret FROM users WHERE username=$1 AND is_active=true', [username]);
+      const { rows } = await pool.query('SELECT user_id, username, password_hash, company_id, role_name, mfa_secret FROM users WHERE (username=$1 OR email=$1) AND is_active=true', [username]);
       if (rows[0]) {
         user = rows[0];
       }
@@ -57,7 +57,7 @@ async function verifyOtpHandler(req, res) {
   try {
     let user = null;
     try {
-      const { rows } = await pool.query('SELECT user_id, username, company_id, role_name, mfa_secret FROM users WHERE username=$1 AND is_active=true', [username]);
+      const { rows } = await pool.query('SELECT user_id, username, company_id, role_name, mfa_secret FROM users WHERE (username=$1 OR email=$1) AND is_active=true', [username]);
       if (rows[0]) {
         user = rows[0];
       }

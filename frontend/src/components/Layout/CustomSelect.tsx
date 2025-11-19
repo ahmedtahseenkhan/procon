@@ -124,7 +124,15 @@ export default function CustomSelect({
 
                 {firstOption && (
                   <button
-                    onClick={() => handleChange(firstOption)}
+                    onClick={() => {
+                      if (multiSelect) {
+                        const all = [...options];
+                        const isAllSelected = Array.isArray(selected) && selected.length === options.length;
+                        handleChange(isAllSelected ? [] : all);
+                      } else {
+                        handleChange(firstOption);
+                      }
+                    }}
                     className={`w-full text-left px-3 py-2 mb-1 rounded-md cursor-pointer ${
                       !multiSelect && selected === firstOption
                         ? "bg-blue-600 text-white"

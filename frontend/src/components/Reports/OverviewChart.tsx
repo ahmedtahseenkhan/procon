@@ -14,51 +14,16 @@ import {
 import CustomSelect from "../Layout/CustomSelect";
 import { useState } from "react";
 
-const data = [
-  {
-    name: "1/1/2024",
-    monthlyIn: 4000,
-    monthlyOut: 2400,
-    profit: 2000,
-    revenue: 5000,
-  },
-  {
-    name: "1/2/2024",
-    monthlyIn: 3000,
-    monthlyOut: 1398,
-    profit: 2210,
-    revenue: 4500,
-  },
-  {
-    name: "1/3/2024",
-    monthlyIn: 2000,
-    monthlyOut: 9800,
-    profit: 2290,
-    revenue: 6000,
-  },
-  {
-    name: "1/4/2024",
-    monthlyIn: 2780,
-    monthlyOut: 3908,
-    profit: 2000,
-    revenue: 5500,
-  },
-  {
-    name: "1/5/2024",
-    monthlyIn: 1890,
-    monthlyOut: 4800,
-    profit: 2181,
-    revenue: 7000,
-  },
-  {
-    name: "1/6/2024",
-    monthlyIn: 2390,
-    monthlyOut: 3800,
-    profit: 2500,
-    revenue: 6500,
-  },
+const extendedData = [
+  { name: "1/1/2024", monthlyIn: 4000, monthlyOut: 2400 },
+  { name: "1/2/2024", monthlyIn: 3000, monthlyOut: 1398 },
+  { name: "1/3/2024", monthlyIn: 2000, monthlyOut: 9800 },
+  { name: "1/4/2024", monthlyIn: 2780, monthlyOut: 3908 },
+  { name: "1/5/2024", monthlyIn: 1890, monthlyOut: 4800 },
+  { name: "1/6/2024", monthlyIn: 2390, monthlyOut: 3800 },
+  { name: "1/7/2024", monthlyIn: 3490, monthlyOut: 4200 },
+  { name: "1/8/2024", monthlyIn: 3200, monthlyOut: 3600 },
 ];
-
 const revenueData = [
   { name: "Jan", profit: 50000, revenue: 70000 },
   { name: "Feb", profit: 45000, revenue: 65000 },
@@ -131,7 +96,12 @@ export default function OverviewChart() {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
-            <ComposedChart data={data}>
+            <BarChart
+              data={extendedData}
+              margin={{ top: 10, right: 10, left: 0, bottom: 5 }}
+              barGap={2}
+              barCategoryGap="-10%"
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#E6E6E6" />
               <XAxis dataKey="name" stroke="#999" />
               <YAxis stroke="#999" />
@@ -142,10 +112,20 @@ export default function OverviewChart() {
                   borderRadius: "8px",
                 }}
               />
-              <Legend />
-              <Bar dataKey="monthlyIn" fill="#10B981" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="monthlyOut" fill="#EF4444" radius={[8, 8, 0, 0]} />
-            </ComposedChart>
+              <Legend verticalAlign="bottom" height={36} />
+              <Bar
+                dataKey="monthlyOut"
+                stackId="a"
+                fill="#E28B88"
+                barSize={20} // thin bars
+              />
+              <Bar
+                dataKey="monthlyIn"
+                stackId="a"
+                fill="#5BB98C"
+                barSize={20} // thin bars
+              />
+            </BarChart>
           </ResponsiveContainer>
         </div>
         <div className="bg-white border border-[#E6E6E6] rounded-lg p-6 shadow-[0px_11px_16px_0px_rgba(220,220,221,0.4)]">

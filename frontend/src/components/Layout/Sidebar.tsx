@@ -58,21 +58,30 @@ function Sidebar({ userInfo, onLogout, isOpen = false }: SidebarProps) {
 
   return (
     <nav
-      className={`z-30 bg-white border-r border-gray-200 h-full flex flex-col transition-all duration-200
-      fixed md:static inset-y-0 left-0 transform md:translate-x-0 py-8 px-5
-      ${
-        isOpen
-          ? "translate-x-0 md:w-[270px]"
-          : "-translate-x-full md:translate-x-0 md:w-[104px]"
-      }
-    `}
+      className={`z-30 bg-white border-r border-gray-200 h-full flex flex-col
+    fixed md:static inset-y-0 left-0 py-8 px-5 sidebar-smooth
+    ${
+      isOpen
+        ? "translate-x-0 md:w-[270px]"
+        : "-translate-x-full md:translate-x-0 md:w-[104px]"
+    }
+  `}
     >
       {/* Logo */}
 
       <div className="flex items-center justify-center mb-4">
         <img src={logoMark} alt="Procon logo" className="w-[56px] h-[56px]" />
         {isOpen && (
-          <span className="font-bold text-[18px] text-[rgba(60,177,121,1)] font-['DM_Sans']">
+          <span
+            className={`ml-3 font-bold text-[18px] text-[rgba(60,177,121,1)] font-['DM_Sans']
+      sidebar-fade inline-block whitespace-nowrap
+      ${
+        isOpen
+          ? "opacity-100 translate-x-0"
+          : "opacity-0 -translate-x-3 pointer-events-none"
+      }
+    `}
+          >
             Procon Gaming
           </span>
         )}
@@ -88,18 +97,28 @@ function Sidebar({ userInfo, onLogout, isOpen = false }: SidebarProps) {
                 key={item.path}
                 to={item.path}
                 className={`flex items-center rounded-[12px] border border-transparent px-[20px] py-[16px] gap-[5px] transition-colors
-            ${
-              isActive
-                ? "bg-[rgba(249,252,250,1)] border-[0.5px] border-[rgba(231,244,238,1)] text-[rgba(17,17,17,1)]"
-                : "text-[rgba(113,113,130,1)] hover:text-[rgba(17,17,17,1)]"
-            }
+                ${
+                  isActive
+                    ? "bg-[rgba(249,252,250,1)] border-[0.5px] border-[rgba(231,244,238,1)] text-[rgba(17,17,17,1)]"
+                    : "text-[rgba(113,113,130,1)] hover:text-[rgba(17,17,17,1)]"
+                }
             ${isOpen ? "justify-start space-x-3" : "justify-center"}
           `}
                 title={item.label}
               >
                 {item.icon}
                 {isOpen && (
-                  <span className="text-sm font-medium">{item.label}</span>
+                  <span
+                    className={`text-sm font-medium sidebar-fade inline-block
+                      ${
+                        isOpen
+                          ? "opacity-100 translate-x-0"
+                          : "opacity-0 -translate-x-2 pointer-events-none"
+                      }
+                    `}
+                  >
+                    {item.label}
+                  </span>
                 )}
               </Link>
             );

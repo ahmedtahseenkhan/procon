@@ -1,19 +1,13 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import {
-  GoogleMap,
-  Marker,
-  InfoWindow,
-  useJsApiLoader,
-} from "@react-google-maps/api";
+import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 import { getDevices, getEvents } from "../../services/api";
 import { Device, DeviceEvent } from "../../types";
-import FiltersSection from "../Layout/FiltersSection";
+import CustomSelect from "../Layout/CustomSelect";
+import TailwindDatepicker from "../Alerts/DatePicker";
 import currency from "../../assets/icons/currency.svg";
 import joystick from "../../assets/icons/joystick.svg";
 import shape from "../../assets/icons/shape.svg";
 import Warning from "../../assets/icons/Warning.svg";
-import CustomSelect from "../Layout/CustomSelect";
-import TailwindDatepicker from "../Alerts/DatePicker";
 import search from "../../assets/icons/search.svg";
 
 interface DashboardStats {
@@ -49,18 +43,14 @@ type GroupStats = {
 };
 
 const severityOptions = ["All Severities", "Critical", "High", "Medium", "Low"];
-const clustersOptions = ["Group A", "Group B", "Group C", "Group D"];
+const groupOptions = ["All Groups", "Group A", "Group B", "Group C", "Group D"];
+const timeOptions = ["Today", "7d", "30d"];
+const months = ["January", "February", "March", "September"];
 
-// Default center coordinates (New York as fallback)
 const DEFAULT_CENTER = { lat: 35.2271, lng: -80.8431 };
 
 function Dashboard() {
-  const [filters, setFilters] = useState<AlertFilters>({
-    severity: "all",
-    eventType: "all",
-    deviceId: "all",
-    dateRange: "all",
-  });
+  // Main state
   const [devices, setDevices] = useState<Device[]>([]);
   const [events, setEvents] = useState<DeviceEvent[]>([]);
   const [stats, setStats] = useState<DashboardStats>({
@@ -73,18 +63,20 @@ function Dashboard() {
     alertChange: 0,
     playerChange: 0,
   });
-  const [searchValue, setSearchValue] = useState("");
-  const [severityValue, setSeverityValue] = useState("all");
-  const [groupValue, setGroupValue] = useState("all");
-  const [dateValue, setDateValue] = useState("all");
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
 
+  // Dropdown states
+  const [selectedMonth, setSelectedMonth] = useState("September");
+  const [selectedGroup, setSelectedGroup] = useState("D");
+  const [selectedSeverity, setSelectedSeverity] = useState("All");
+  const [selectedTime, setSelectedTime] = useState("7d");
+  const [searchValue, setSearchValue] = useState("");
+
+  const mapRef = useRef<google.maps.Map | null>(null);
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
   });
 
-  // Events sorted newest-first
+  // Memoized and derived data
   const sortedEvents = useMemo(
     () =>
       [...events].sort(
@@ -95,7 +87,6 @@ function Dashboard() {
     [events]
   );
 
-  // Derive latest severity per device from events
   const severityByDevice = useMemo(() => {
     const result: Record<string, "normal" | "warning" | "critical"> = {};
     for (const ev of sortedEvents) {
@@ -108,29 +99,6 @@ function Dashboard() {
     return result;
   }, [sortedEvents]);
 
-  const latestEventByDevice = useMemo(() => {
-    const result: Record<string, DeviceEvent> = {};
-    for (const ev of sortedEvents) {
-      const key = ev.device_id || ev.imei || ev.serial_number;
-      if (!key || result[key]) continue;
-      result[key] = ev;
-    }
-    return result;
-  }, [sortedEvents]);
-
-  const severityCounts = useMemo(
-    () => {
-      const counts = { normal: 0, warning: 0, critical: 0 };
-      for (const d of devices) {
-        const key = d.device_id || d.imei || d.serial_number;
-        const sev = key && severityByDevice[key] ? severityByDevice[key] : "normal";
-        counts[sev] += 1;
-      }
-      return counts;
-    },
-    [devices, severityByDevice]
-  );
-
   const deviceByKey = useMemo(() => {
     const map: Record<string, Device> = {};
     for (const d of devices) {
@@ -141,51 +109,32 @@ function Dashboard() {
     return map;
   }, [devices]);
 
-  // FIXED: Better map center calculation
-  const mapCenter = useMemo(() => {
-    const devicesWithCoords = devices.filter(
-      (d) => d.lat !== undefined && d.lat !== null && d.lon !== undefined && d.lon !== null
-    );
-
-    if (devicesWithCoords.length === 0) {
-      return DEFAULT_CENTER;
+  const severityCounts = useMemo(() => {
+    const counts = { normal: 0, warning: 0, critical: 0 };
+    for (const d of devices) {
+      const key = d.device_id || d.imei || d.serial_number;
+      const sev =
+        key && severityByDevice[key] ? severityByDevice[key] : "normal";
+      counts[sev] += 1;
     }
+    return counts;
+  }, [devices, severityByDevice]);
 
-    // Calculate average center of all devices
-    const sum = devicesWithCoords.reduce(
-      (acc, device) => {
-        return {
-          lat: acc.lat + Number(device.lat),
-          lng: acc.lng + Number(device.lon),
-        };
-      },
+  const mapCenter = useMemo(() => {
+    const coords = devices.filter((d) => d.lat != null && d.lon != null);
+    if (coords.length === 0) return DEFAULT_CENTER;
+    const sum = coords.reduce(
+      (acc, d) => ({
+        lat: acc.lat + Number(d.lat),
+        lng: acc.lng + Number(d.lon),
+      }),
       { lat: 0, lng: 0 }
     );
-
-    return {
-      lat: sum.lat / devicesWithCoords.length,
-      lng: sum.lng / devicesWithCoords.length,
-    };
+    return { lat: sum.lat / coords.length, lng: sum.lng / coords.length };
   }, [devices]);
 
-  // FIXED: Better group stats with coordinate validation
   const groupStats = useMemo<GroupStats[]>(() => {
-    const groups = new Map<
-      string,
-      {
-        devices: Device[];
-        alerts: number;
-        critical: number;
-        warning: number;
-        maintenance: number;
-        online: number;
-        revenue: number;
-        latSum: number;
-        lonSum: number;
-        coordsCount: number;
-      }
-    >();
-
+    const groups = new Map<string, any>();
     const ensureGroup = (name: string) => {
       const key = name || "Ungrouped";
       if (!groups.has(key)) {
@@ -205,25 +154,22 @@ function Dashboard() {
       return groups.get(key)!;
     };
 
-    for (const d of devices) {
+    devices.forEach((d) => {
       const g = ensureGroup(d.group_name || "Ungrouped");
       g.devices.push(d);
       if (d.is_online) g.online += 1;
-      
-      // FIXED: Better coordinate validation
-      const lat = typeof d.lat === 'number' ? d.lat : parseFloat(d.lat as any);
-      const lon = typeof d.lon === 'number' ? d.lon : parseFloat(d.lon as any);
-      
-      if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+      const lat = Number(d.lat),
+        lon = Number(d.lon);
+      if (!isNaN(lat) && !isNaN(lon)) {
         g.latSum += lat;
         g.lonSum += lon;
         g.coordsCount += 1;
       }
-    }
+    });
 
-    for (const ev of events) {
+    events.forEach((ev) => {
       const key = ev.device_id || ev.imei || ev.serial_number;
-      if (!key) continue;
+      if (!key) return;
       const dev = deviceByKey[key];
       const g = ensureGroup(dev?.group_name || "Ungrouped");
       g.alerts += 1;
@@ -231,35 +177,21 @@ function Dashboard() {
       else if (ev.severity === "warning" || ev.severity === "high")
         g.warning += 1;
       if (ev.category === "maintenance") g.maintenance += 1;
-      if (ev.is_financial_event && typeof ev.parsed_amount === "number") {
+      if (ev.is_financial_event && typeof ev.parsed_amount === "number")
         g.revenue += ev.parsed_amount;
-      }
-    }
+    });
 
     const result: GroupStats[] = [];
-    for (const [name, g] of groups.entries()) {
+    groups.forEach((g, name) => {
       const machines = g.devices.length;
       const uptime = machines ? (g.online / machines) * 100 : 0;
-      
       let color: "green" | "orange" | "red" = "green";
       if (name === "Group A") color = "orange";
       else if (name === "Group B") color = "red";
-      else if (name === "Group C") color = "green";
       else if (name === "Group D") color = "red";
 
-      // FIXED: Better coordinate calculation with validation
-      let lat: number | null = null;
-      let lon: number | null = null;
-      
-      if (g.coordsCount > 0) {
-        const avgLat = g.latSum / g.coordsCount;
-        const avgLon = g.lonSum / g.coordsCount;
-        
-        if (!isNaN(avgLat) && !isNaN(avgLon) && avgLat >= -90 && avgLat <= 90 && avgLon >= -180 && avgLon <= 180) {
-          lat = avgLat;
-          lon = avgLon;
-        }
-      }
+      const lat = g.coordsCount > 0 ? g.latSum / g.coordsCount : null;
+      const lon = g.coordsCount > 0 ? g.lonSum / g.coordsCount : null;
 
       result.push({
         name,
@@ -274,16 +206,12 @@ function Dashboard() {
         lat,
         lon,
       });
-    }
-    result.sort((a, b) => b.alerts - a.alerts);
-    return result;
+    });
+    return result.sort((a, b) => b.alerts - a.alerts);
   }, [devices, events, deviceByKey]);
 
   const selectedGroupStats = useMemo(
-    () =>
-      selectedGroup
-        ? groupStats.find((g) => g.name === selectedGroup) || null
-        : null,
+    () => groupStats.find((g) => g.name === selectedGroup) || null,
     [groupStats, selectedGroup]
   );
 
@@ -304,30 +232,17 @@ function Dashboard() {
     };
   };
 
-  // FIXED: Map load handler
   const onMapLoad = (map: google.maps.Map) => {
     mapRef.current = map;
-    
-    // Fit bounds to show all markers
     if (groupStats.length > 0) {
       const bounds = new google.maps.LatLngBounds();
-      
-      groupStats.forEach((group) => {
-        if (group.lat !== null && group.lon !== null) {
-          bounds.extend(new google.maps.LatLng(group.lat, group.lon));
-        }
-      });
-      
-      // If we have valid bounds, fit the map to them
-      if (!bounds.isEmpty()) {
-        map.fitBounds(bounds);
-        
-        // Don't zoom too far out
-        const zoom = map.getZoom();
-        if (zoom && zoom < 8) {
-          map.setZoom(8);
-        }
-      }
+      groupStats.forEach(
+        (g) =>
+          g.lat != null &&
+          g.lon != null &&
+          bounds.extend({ lat: g.lat, lng: g.lon })
+      );
+      if (!bounds.isEmpty()) map.fitBounds(bounds);
     }
   };
 
@@ -338,18 +253,11 @@ function Dashboard() {
           getDevices(),
           getEvents(),
         ]);
-
         const devicesData = devicesRes.devices || [];
         const eventsData = eventsRes.events || [];
-
-        // FIXED: Log coordinates for debugging
-        console.log("Devices with coordinates:", devicesData.filter(d => d.lat && d.lon));
-        console.log("Map center will be:", mapCenter);
-
         setDevices(devicesData);
         setEvents(eventsData);
 
-        // Calculate stats
         const activeMachines = devicesData.filter(
           (d: Device) => d.is_online
         ).length;
@@ -363,8 +271,6 @@ function Dashboard() {
               sum + (Number(e.parsed_amount) || 0),
             0
           );
-
-        // Mock live players (this would come from actual gaming data)
         const livePlayers = Math.floor(Math.random() * 2000) + 1500;
 
         setStats({
@@ -372,10 +278,10 @@ function Dashboard() {
           activeMachines,
           activeAlerts,
           livePlayers,
-          revenueChange: 12.5, // Mock data
-          machineChange: 3, // Mock data
-          alertChange: -8, // Mock data
-          playerChange: 12.7, // Mock data
+          revenueChange: 12.5,
+          machineChange: 3,
+          alertChange: -8,
+          playerChange: 12.7,
         });
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
@@ -383,10 +289,13 @@ function Dashboard() {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
-
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Common dropdown style
+  const dropdownBtnClass = `w-full px-0 py-0 text-[12px] font-semibold text-[rgba(10,10,10,1)] text-left flex justify-between items-center outline-none bg-transparent border-none space-x-1`;
+  const dropdownContainerClass = `w-[160px]`;
 
   return (
     <div className="space-y-6">
@@ -424,26 +333,18 @@ function Dashboard() {
               /hr
             </div>
           </div>
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-2">
             <span className="font-semibold text-[12px] text-[rgba(10,10,10,1)]">
-              Month: September
+              Month:
             </span>
-            <span>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={1.5}
-                stroke="currentColor"
-                className="w-[16px] h-[16px] text-[rgba(10,10,10,1)]"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="m19.5 8.25-7.5 7.5-7.5-7.5"
-                />
-              </svg>
-            </span>
+            <CustomSelect
+              options={months}
+              value={selectedMonth}
+              onChange={(val) => setSelectedMonth(val as string)}
+              buttonClassName={`px-0 py-0 text-[12px] font-semibold text-[rgba(10,10,10,1)] text-left flex justify-between items-center outline-none bg-transparent border-none space-x-1`}
+              optionsClassName="w-[170px]"
+              containerClassName=""
+            />
           </div>
         </div>
 
@@ -470,48 +371,28 @@ function Dashboard() {
               99.2% uptime
             </div>
           </div>
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 ">
             <div className="flex items-center space-x-1">
-              <span className="font-semibold text-[12px] text-[rgba(10,10,10,1)]">
-                Time: This Month
-              </span>
-              <span>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="w-[16px] h-[16px] text-[rgba(10,10,10,1)]"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="m19.5 8.25-7.5 7.5-7.5-7.5"
-                  />
-                </svg>
-              </span>
+              <span className="font-semibold text-[12px]">Time:</span>
+              <CustomSelect
+                options={timeOptions}
+                value={selectedTime}
+                onChange={(val) => setSelectedTime(val as string)}
+                buttonClassName={`px-0 py-0 text-[12px] font-semibold text-[rgba(10,10,10,1)] text-left flex justify-between items-center outline-none bg-transparent border-none space-x-1`}
+                optionsClassName="w-[170px]"
+                containerClassName=""
+              />
             </div>
             <div className="flex items-center space-x-1">
-              <span className="font-semibold text-[12px] text-[rgba(10,10,10,1)]">
-                Group: D
-              </span>
-              <span>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="w-[16px] h-[16px] text-[rgba(10,10,10,1)]"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="m19.5 8.25-7.5 7.5-7.5-7.5"
-                  />
-                </svg>
-              </span>
+              <span className="font-semibold text-[12px]">Group:</span>
+              <CustomSelect
+                options={groupOptions}
+                value={selectedGroup}
+                onChange={(val) => setSelectedGroup(val as string)}
+                buttonClassName={`px-0 py-0 text-[12px] font-semibold text-[rgba(10,10,10,1)] text-left flex justify-between items-center outline-none bg-transparent border-none space-x-1`}
+                optionsClassName="w-[170px]"
+                containerClassName=""
+              />
             </div>
           </div>
         </div>
@@ -541,67 +422,37 @@ function Dashboard() {
           </div>
           <div className="flex items-center space-x-3">
             <div className="flex items-center space-x-1">
-              <span className="font-semibold text-[12px] text-[rgba(10,10,10,1)]">
-                Group: D
-              </span>
-              <span>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="w-[16px] h-[16px] text-[rgba(10,10,10,1)]"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="m19.5 8.25-7.5 7.5-7.5-7.5"
-                  />
-                </svg>
-              </span>
+              <span className="font-semibold text-[12px]">Group:</span>
+              <CustomSelect
+                options={groupOptions}
+                value={selectedGroup}
+                onChange={(val) => setSelectedGroup(val as string)}
+                buttonClassName={`px-0 py-0 text-[12px] font-semibold text-[rgba(10,10,10,1)] text-left flex justify-between items-center outline-none bg-transparent border-none space-x-1`}
+                optionsClassName="w-[170px]"
+                containerClassName=""
+              />
             </div>
             <div className="flex items-center space-x-1">
-              <span className="font-semibold text-[12px] text-[rgba(10,10,10,1)]">
-                Severity: All
-              </span>
-              <span>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="w-[16px] h-[16px] text-[rgba(10,10,10,1)]"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="m19.5 8.25-7.5 7.5-7.5-7.5"
-                  />
-                </svg>
-              </span>
+              <span className="font-semibold text-[12px]">Severity:</span>
+              <CustomSelect
+                options={severityOptions}
+                value={selectedSeverity}
+                onChange={(val) => setSelectedSeverity(val as string)}
+                containerClassName=""
+                buttonClassName={`px-0 py-0 text-[12px] font-semibold text-[rgba(10,10,10,1)] text-left flex justify-between items-center outline-none bg-transparent border-none space-x-1`}
+                optionsClassName="w-[170px]"
+              />
             </div>
             <div className="flex items-center space-x-1">
-              <span className="font-semibold text-[12px] text-[rgba(10,10,10,1)]">
-                Time: 7d
-              </span>
-              <span>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="w-[16px] h-[16px] text-[rgba(10,10,10,1)]"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="m19.5 8.25-7.5 7.5-7.5-7.5"
-                  />
-                </svg>
-              </span>
+              <span className="font-semibold text-[12px]">Time:</span>
+              <CustomSelect
+                options={timeOptions}
+                value={selectedTime}
+                onChange={(val) => setSelectedTime(val as string)}
+                containerClassName=""
+                buttonClassName={`px-0 py-0 text-[12px] font-semibold text-[rgba(10,10,10,1)] text-left flex justify-between items-center outline-none bg-transparent border-none space-x-1`}
+                optionsClassName="w-[170px]"
+              />
             </div>
           </div>
         </div>
@@ -659,7 +510,7 @@ function Dashboard() {
           />
 
           <CustomSelect
-            options={clustersOptions}
+            options={groupOptions}
             firstOption="All Clusters"
             multiSelect={true}
             onChange={(selected) => console.log("Selected:", selected)}

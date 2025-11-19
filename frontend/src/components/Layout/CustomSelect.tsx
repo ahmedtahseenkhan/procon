@@ -127,7 +127,9 @@ export default function CustomSelect({
                     onClick={() => {
                       if (multiSelect) {
                         const all = [...options];
-                        const isAllSelected = Array.isArray(selected) && selected.length === options.length;
+                        const isAllSelected =
+                          Array.isArray(selected) &&
+                          selected.length === options.length;
                         handleChange(isAllSelected ? [] : all);
                       } else {
                         handleChange(firstOption);

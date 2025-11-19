@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { getEvents, getDevices } from "../../services/api";
 import { DeviceEvent } from "../../types";
 import AlertDetailModal from "./AlertDetailModal";
-import search from "../../assets/icons/search.svg";
+import searchIcon from "../../assets/icons/search.svg";
 import DatePicker from "./DatePicker";
 import arrowright from "../../assets/icons/arrowright.svg";
 import {
@@ -266,7 +266,7 @@ function AlertFeed() {
             <DatePicker />
             <div className="relative w-[231px]">
               <img
-                src={search}
+                src={searchIcon}
                 alt="search"
                 className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 pointer-events-none"
               />

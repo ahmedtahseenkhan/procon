@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   GoogleMap,
   Marker,
@@ -15,6 +15,7 @@ import Warning from "../../assets/icons/Warning.svg";
 import CustomSelect from "../Layout/CustomSelect";
 import TailwindDatepicker from "../Alerts/DatePicker";
 import search from "../../assets/icons/search.svg";
+
 interface DashboardStats {
   totalRevenue: number;
   activeMachines: number;
@@ -25,12 +26,14 @@ interface DashboardStats {
   alertChange: number;
   playerChange: number;
 }
+
 interface AlertFilters {
   severity: string;
   eventType: string;
   deviceId: string;
   dateRange: string;
 }
+
 type GroupStats = {
   name: string;
   color: "green" | "orange" | "red";
@@ -44,8 +47,13 @@ type GroupStats = {
   lat: number | null;
   lon: number | null;
 };
+
 const severityOptions = ["All Severities", "Critical", "High", "Medium", "Low"];
 const clustersOptions = ["Group A", "Group B", "Group C", "Group D"];
+
+// Default center coordinates (New York as fallback)
+const DEFAULT_CENTER = { lat: 35.2271, lng: -80.8431 };
+
 function Dashboard() {
   const [filters, setFilters] = useState<AlertFilters>({
     severity: "all",
@@ -70,6 +78,7 @@ function Dashboard() {
   const [groupValue, setGroupValue] = useState("all");
   const [dateValue, setDateValue] = useState("all");
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const mapRef = useRef<google.maps.Map | null>(null);
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
@@ -132,19 +141,34 @@ function Dashboard() {
     return map;
   }, [devices]);
 
+  // FIXED: Better map center calculation
   const mapCenter = useMemo(() => {
-    const firstWithCoords = devices.find(
+    const devicesWithCoords = devices.filter(
       (d) => d.lat !== undefined && d.lat !== null && d.lon !== undefined && d.lon !== null
     );
-    if (firstWithCoords) {
-      return {
-        lat: Number(firstWithCoords.lat),
-        lng: Number(firstWithCoords.lon),
-      };
+
+    if (devicesWithCoords.length === 0) {
+      return DEFAULT_CENTER;
     }
-    return { lat: 0, lng: 0 };
+
+    // Calculate average center of all devices
+    const sum = devicesWithCoords.reduce(
+      (acc, device) => {
+        return {
+          lat: acc.lat + Number(device.lat),
+          lng: acc.lng + Number(device.lon),
+        };
+      },
+      { lat: 0, lng: 0 }
+    );
+
+    return {
+      lat: sum.lat / devicesWithCoords.length,
+      lng: sum.lng / devicesWithCoords.length,
+    };
   }, [devices]);
 
+  // FIXED: Better group stats with coordinate validation
   const groupStats = useMemo<GroupStats[]>(() => {
     const groups = new Map<
       string,
@@ -185,9 +209,14 @@ function Dashboard() {
       const g = ensureGroup(d.group_name || "Ungrouped");
       g.devices.push(d);
       if (d.is_online) g.online += 1;
-      if (typeof d.lat === "number" && typeof d.lon === "number") {
-        g.latSum += d.lat;
-        g.lonSum += d.lon;
+      
+      // FIXED: Better coordinate validation
+      const lat = typeof d.lat === 'number' ? d.lat : parseFloat(d.lat as any);
+      const lon = typeof d.lon === 'number' ? d.lon : parseFloat(d.lon as any);
+      
+      if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+        g.latSum += lat;
+        g.lonSum += lon;
         g.coordsCount += 1;
       }
     }
@@ -211,14 +240,27 @@ function Dashboard() {
     for (const [name, g] of groups.entries()) {
       const machines = g.devices.length;
       const uptime = machines ? (g.online / machines) * 100 : 0;
-      // Fixed group colors for markers/legend
+      
       let color: "green" | "orange" | "red" = "green";
       if (name === "Group A") color = "orange";
       else if (name === "Group B") color = "red";
       else if (name === "Group C") color = "green";
       else if (name === "Group D") color = "red";
-      const lat = g.coordsCount ? g.latSum / g.coordsCount : null;
-      const lon = g.coordsCount ? g.lonSum / g.coordsCount : null;
+
+      // FIXED: Better coordinate calculation with validation
+      let lat: number | null = null;
+      let lon: number | null = null;
+      
+      if (g.coordsCount > 0) {
+        const avgLat = g.latSum / g.coordsCount;
+        const avgLon = g.lonSum / g.coordsCount;
+        
+        if (!isNaN(avgLat) && !isNaN(avgLon) && avgLat >= -90 && avgLat <= 90 && avgLon >= -180 && avgLon <= 180) {
+          lat = avgLat;
+          lon = avgLon;
+        }
+      }
+
       result.push({
         name,
         color,
@@ -262,6 +304,33 @@ function Dashboard() {
     };
   };
 
+  // FIXED: Map load handler
+  const onMapLoad = (map: google.maps.Map) => {
+    mapRef.current = map;
+    
+    // Fit bounds to show all markers
+    if (groupStats.length > 0) {
+      const bounds = new google.maps.LatLngBounds();
+      
+      groupStats.forEach((group) => {
+        if (group.lat !== null && group.lon !== null) {
+          bounds.extend(new google.maps.LatLng(group.lat, group.lon));
+        }
+      });
+      
+      // If we have valid bounds, fit the map to them
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds);
+        
+        // Don't zoom too far out
+        const zoom = map.getZoom();
+        if (zoom && zoom < 8) {
+          map.setZoom(8);
+        }
+      }
+    }
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -272,6 +341,10 @@ function Dashboard() {
 
         const devicesData = devicesRes.devices || [];
         const eventsData = eventsRes.events || [];
+
+        // FIXED: Log coordinates for debugging
+        console.log("Devices with coordinates:", devicesData.filter(d => d.lat && d.lon));
+        console.log("Map center will be:", mapCenter);
 
         setDevices(devicesData);
         setEvents(eventsData);
@@ -317,7 +390,7 @@ function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Main Dashboard Cards */}
+      {/* Main Dashboard Cards - Your existing code remains the same */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 ">
         {/* Total Revenue Card */}
         <div className="bg-[#FEFEFE] border border-[#E6E6E6] rounded-lg p-4 shadow-[0px_11px_16px_0px_rgba(220,220,221,0.4)]">
@@ -557,6 +630,7 @@ function Dashboard() {
           </div>
         </div>
       </div>
+
       <div className="flex justify-between items-center rounded-lg border border-[rgba(230,230,230,1)] bg-[rgba(254,254,254,1)] p-5">
         <h3 className="text-[18px] font-medium leading-[100%] tracking-[-0.02em] text-gray-900">
           Filters & Search
@@ -592,19 +666,8 @@ function Dashboard() {
           />
         </div>
       </div>
-      {/* Filters & Search Section */}
-      {/* <FiltersSection
-        onSearchChange={setSearchValue}
-        onSeverityChange={setSeverityValue}
-        onGroupChange={setGroupValue}
-        onDateChange={setDateValue}
-        searchValue={searchValue}
-        severityValue={severityValue}
-        groupValue={groupValue}
-        dateValue={dateValue}
-      /> */}
 
-      {/* Gaming Machine Group Map Section */}
+      {/* Gaming Machine Group Map Section - UPDATED */}
       <div className="bg-[#FEFEFE] border border-[#E6E6E6] rounded-lg p-6 shadow-[0px_11px_16px_0px_rgba(220,220,221,0.4)]">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-[16px] font-semibold text-[rgba(17,17,17,1)] leading-[100%] tracking-[-0.02em] font-['DM_Sans'] align-middle">
@@ -645,12 +708,9 @@ function Dashboard() {
               </div>
             </div>
             <div className="flex items-center gap-2 w-[171px]  bg-[rgba(244,244,245,1)] p-[4px] rounded-[12px]">
-              {/* Active button (Map) */}
               <button className="px-[15px] h-[40px] bg-white text-[rgba(17,17,17,1)]  text-[16px] font-normal rounded-[12px]  transition-colors">
                 Map
               </button>
-
-              {/* Inactive button (Satellite) */}
               <button className="px-[15px] bg-transparent h-[40px] text-[rgba(113,113,130,1)] text-[16px] font-normal  rounded-[12px]  hover:bg-white hover:text-[rgba(17,17,17,1)] transition-colors">
                 Satellite
               </button>
@@ -661,7 +721,7 @@ function Dashboard() {
         {/* Map with overlays */}
         <div className="relative h-96 bg-gray-100 rounded-lg overflow-hidden">
           {/* Search icon (top-left) */}
-          <div className="absolute top-3 left-3 bg-white border border-gray-200 rounded-lg p-2 shadow-sm">
+          <div className="absolute top-3 left-3 bg-white border border-gray-200 rounded-lg p-2 shadow-sm z-10">
             <svg
               className="w-5 h-5 text-gray-600"
               fill="none"
@@ -678,7 +738,7 @@ function Dashboard() {
           </div>
 
           {selectedGroupStats && (
-            <div className="absolute top-16 left-3 bg-[rgba(254,254,254,1)] border border-[rgba(230,230,230,1)] rounded-[8px] shadow-[0px_11px_16px_0px_rgba(220,220,221,0.4)] p-[24px] min-w-[220px]">
+            <div className="absolute top-16 left-3 bg-[rgba(254,254,254,1)] border border-[rgba(230,230,230,1)] rounded-[8px] shadow-[0px_11px_16px_0px_rgba(220,220,221,0.4)] p-[24px] min-w-[220px] z-10">
               <div className="flex items-center mb-3">
                 <div
                   className={`w-3 h-3 rounded-full ${
@@ -717,7 +777,7 @@ function Dashboard() {
           )}
 
           {/* Legend (bottom-left) */}
-          <div className="absolute bottom-3 z-[5] left-3  bg-[rgba(254,254,254,1)] border border-[rgba(230,230,230,1)] rounded-[8px] shadow-[0px_11px_16px_0px_rgba(220,220,221,0.4)] p-[24px]">
+          <div className="absolute bottom-3 z-10 left-3  bg-[rgba(254,254,254,1)] border border-[rgba(230,230,230,1)] rounded-[8px] shadow-[0px_11px_16px_0px_rgba(220,220,221,0.4)] p-[24px]">
             <div className="grid grid-cols-2 gap-x-6 gap-y-4">
               {groupStats.map((g) => (
                 <button
@@ -748,7 +808,7 @@ function Dashboard() {
             </div>
           </div>
 
-          {/* Google Map */}
+          {/* Google Map - UPDATED */}
           <div className="absolute inset-0">
             {!isLoaded ? (
               <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
@@ -758,12 +818,15 @@ function Dashboard() {
               <GoogleMap
                 mapContainerStyle={{ width: "100%", height: "100%" }}
                 center={mapCenter}
-                zoom={4}
+                zoom={6}
+                onLoad={onMapLoad}
                 options={{
                   disableDefaultUI: false,
                   streetViewControl: false,
                   mapTypeControl: false,
                   fullscreenControl: false,
+                  minZoom: 3,
+                  maxZoom: 18,
                 }}
               >
                 {groupStats.map((g) => {
@@ -783,27 +846,6 @@ function Dashboard() {
                     />
                   );
                 })}
-                {selectedGroupStats &&
-                  selectedGroupStats.lat !== null &&
-                  selectedGroupStats.lon !== null && (
-                    <InfoWindow
-                      position={{
-                        lat: selectedGroupStats.lat,
-                        lng: selectedGroupStats.lon,
-                      }}
-                      options={{ maxWidth: 260 }}
-                      onCloseClick={() => setSelectedGroup(null)}
-                    >
-                      <div className="text-xs text-white bg-black rounded-md px-3 py-2 space-y-1">
-                        <div className="font-semibold">
-                          {selectedGroupStats.name}
-                        </div>
-                        <div>Critical: {selectedGroupStats.critical}</div>
-                        <div>Warning: {selectedGroupStats.warning}</div>
-                        <div>Maintenance: {selectedGroupStats.maintenance}</div>
-                      </div>
-                    </InfoWindow>
-                  )}
               </GoogleMap>
             )}
           </div>
